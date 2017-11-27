@@ -1,0 +1,9 @@
+.Python
+.idea/
+.ipynb_checkpoints/
+bin/
+include/
+lib/
+pip-selfcheck.json
+data/*train.txt
+data/*test.txt
