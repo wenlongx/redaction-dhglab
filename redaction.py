@@ -10,7 +10,7 @@ import theano.tensor as T
 
 import lasagne
 from lasagne.nonlinearities import leaky_rectify, rectify, tanh, sigmoid, softmax
-from lasagne.layers import InputLayer, DenseLayer, Conv2DLayer, TransposedConv2DLayer, ReshapeLayer
+from lasagne.layers import InputLayer, DenseLayer, ReshapeLayer
 
 def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
     assert len(inputs) == len(targets)
@@ -39,14 +39,14 @@ class RedactionNetwork(object):
         discr_layer = self._build_discriminator(enc_layer)
 
         dec_output = lasagne.layers.get_output(dec_layer)
-        discr_output = lasagne.layers.get_output(discr_layer)
+        discr_output = lasagne.layers.get_output(discr_layer, deterministic=True)
 
         dec_err = T.mean(lasagne.objectives.squared_error(inputs, dec_output)) # Squared err
-        discr_err = T.mean(T.abs_(targets - discr_output)) # MAE
+        discr_err = T.mean(lasagne.objectives.squared_error(targets, discr_output)) # MAE
 
-        ae_loss = dec_err - 0.0*discr_err
+        ae_loss = dec_err + 0.0*discr_err
         adv_loss = discr_err
-        joint_loss = (alpha * ae_loss) + (1.0 - alpha) * (10**5) * ((1.0/self.output_size) - adv_loss)**2
+        joint_loss = (alpha * ae_loss) + (1.0 - alpha) * ((1.0/6.0) - adv_loss)**2
 
         ae_params = lasagne.layers.get_all_params(dec_layer, trainable=True)
         num_enc_params = len(lasagne.layers.get_all_params(enc_layer, trainable=True))
@@ -54,15 +54,15 @@ class RedactionNetwork(object):
         joint_params = lasagne.layers.get_all_params([dec_layer, discr_layer], trainable=True)
         self.joint_params = joint_params
 
-        ae_updates = lasagne.updates.adadelta(ae_loss, ae_params)
-        adv_updates = lasagne.updates.adadelta(adv_loss, adv_params)
-        joint_updates = lasagne.updates.adadelta(joint_loss, joint_params)
+        ae_updates = lasagne.updates.momentum(ae_loss, ae_params, 0.01)
+        adv_updates = lasagne.updates.momentum(adv_loss, adv_params, 0.01)
+        joint_updates = lasagne.updates.momentum(joint_loss, joint_params, 0.01)
 
         self.ae_train_fn = theano.function([inputs, targets], ae_loss, updates=ae_updates)
         self.adv_train_fn = theano.function([inputs, targets], adv_loss, updates=adv_updates)
         self.joint_train_fn = theano.function([inputs, targets], joint_loss, updates=joint_updates)
 
-        adv_accuracy = 1.0 - T.mean(T.abs_(discr_output - targets))
+	adv_accuracy = T.mean(lasagne.objectives.squared_error(targets, discr_output))
         self.adv_accuracy_fn = theano.function([inputs, targets], adv_accuracy)
 
         self.discr_pred_fn = theano.function([inputs], discr_output)
@@ -75,7 +75,7 @@ class RedactionNetwork(object):
         size = self.input_size
         while size > self.enc_size * 2:
             for i in xrange(self.module_size):
-                layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify, init=lasagne.init.GlorotUniform())
+                layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify, W=lasagne.init.GlorotUniform())
             size = size // 2
         # ======================================================================================
 
@@ -89,11 +89,11 @@ class RedactionNetwork(object):
         size = self.enc_size * 2
         while size < self.input_size * 2:
             for i in xrange(self.module_size):
-                layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify, init=lasagne.init.GlorotUniform())
+                layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify, W=lasagne.init.GlorotUniform())
             size *= 2
         # ======================================================================================
 
-        layer = lasagne.layers.DenseLayer(layer, num_units=self.input_size, nonlinearity=rectify, init=lasagne.init.GlorotUniform())
+        layer = lasagne.layers.DenseLayer(layer, num_units=self.input_size, nonlinearity=rectify, W=lasagne.init.GlorotUniform())
         layer = lasagne.layers.ReshapeLayer(layer, shape=(-1, self.input_size))
 
         return layer
@@ -103,7 +103,7 @@ class RedactionNetwork(object):
 
         # ======================================================================================
         for i in xrange(self.num_discr_layers):
-            layer = DenseLayer(layer, num_units=self.output_size*2, nonlinearity=leaky_rectify, init=lasagne.init.GlorotUniform())
+            layer = DenseLayer(layer, num_units=self.output_size*2, nonlinearity=leaky_rectify, W=lasagne.init.GlorotUniform())
         # ======================================================================================
 
         layer = DenseLayer(layer, num_units=self.output_size, nonlinearity=softmax)
@@ -170,8 +170,6 @@ if __name__ == '__main__':
     #adv_acc = r.adv_accuracy_fn(X_test, y_test)
     #adv_acc = r.adv_accuracy_fn(X_test, y_test)
     X_calibrated = r.dec_pred_fn(X_test)
-    calibrated_pred_acc = r.adv_accuracy_fn(X_test, y_test)
-    print("Calibrated accuracy: \t{:.3f}".format(calibrated_pred_acc))
     
     name_str = str(sys.argv[0].split('.')[0]) + '_' + str(ENCODING_SIZE) + '_' + str(RECON_ALPHA)
     np.savetxt(name_str + '_calibrated.txt', X_calibrated)
