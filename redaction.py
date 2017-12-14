@@ -25,7 +25,7 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
         yield inputs[excerpt], targets[excerpt]
 
 class RedactionNetwork(object):
-    def __init__(self, inputs, targets, shape=None, encoding_size=15, output_size=None, alpha=0.5):
+    def __init__(self, inputs, targets, shape=None, encoding_size=15, output_size=None, alpha=0.5, module_size=2, num_dl=4):
         self.enc_size = encoding_size
         self._shape = shape
         self.input_size = np.prod(self._shape[1:])
@@ -64,7 +64,6 @@ class RedactionNetwork(object):
 
         adv_accuracy = 1.0 - T.mean(T.abs_(discr_output - targets))
         self.adv_accuracy_fn = theano.function([inputs, targets], adv_accuracy)
-        self.dec_err_fn = theano.function([inputs, targets], dec_err)
 
         self.discr_pred_fn = theano.function([inputs], discr_output)
         self.dec_pred_fn = theano.function([inputs], dec_output)
@@ -76,7 +75,7 @@ class RedactionNetwork(object):
         size = self.input_size
         while size > self.enc_size * 2:
             for i in xrange(self.module_size):
-                layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify)
+                layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify, init=lasagne.init.GlorotUniform())
             size = size // 2
         # ======================================================================================
 
@@ -90,11 +89,11 @@ class RedactionNetwork(object):
         size = self.enc_size * 2
         while size < self.input_size * 2:
             for i in xrange(self.module_size):
-                layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify)
+                layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify, init=lasagne.init.GlorotUniform())
             size *= 2
         # ======================================================================================
 
-        layer = lasagne.layers.DenseLayer(layer, num_units=self.input_size, nonlinearity=rectify)
+        layer = lasagne.layers.DenseLayer(layer, num_units=self.input_size, nonlinearity=rectify, init=lasagne.init.GlorotUniform())
         layer = lasagne.layers.ReshapeLayer(layer, shape=(-1, self.input_size))
 
         return layer
@@ -104,7 +103,7 @@ class RedactionNetwork(object):
 
         # ======================================================================================
         for i in xrange(self.num_discr_layers):
-            layer = DenseLayer(layer, num_units=self.output_size*2, nonlinearity=leaky_rectify)
+            layer = DenseLayer(layer, num_units=self.output_size*2, nonlinearity=leaky_rectify, init=lasagne.init.GlorotUniform())
         # ======================================================================================
 
         layer = DenseLayer(layer, num_units=self.output_size, nonlinearity=softmax)
