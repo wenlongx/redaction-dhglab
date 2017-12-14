@@ -25,12 +25,14 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
         yield inputs[excerpt], targets[excerpt]
 
 class RedactionNetwork(object):
-    def __init__(self, inputs, targets, shape=None,encoding_size=15, output_size=None, alpha=0.5):
+    def __init__(self, inputs, targets, shape=None, encoding_size=15, output_size=None, alpha=0.5):
         self.enc_size = encoding_size
         self._shape = shape
         self.input_size = np.prod(self._shape[1:])
         self.output_size = output_size
         self.alpha = alpha
+        self.module_size = module_size
+        self.num_discr_layers = num_dl
 
         enc_layer = self._build_encoder(self._shape, input_var=inputs)
         dec_layer = self._build_decoder(enc_layer)
@@ -62,6 +64,7 @@ class RedactionNetwork(object):
 
         adv_accuracy = 1.0 - T.mean(T.abs_(discr_output - targets))
         self.adv_accuracy_fn = theano.function([inputs, targets], adv_accuracy)
+        self.dec_err_fn = theano.function([inputs, targets], dec_err)
 
         self.discr_pred_fn = theano.function([inputs], discr_output)
         self.dec_pred_fn = theano.function([inputs], dec_output)
@@ -69,12 +72,11 @@ class RedactionNetwork(object):
     def _build_encoder(self, shape, input_var = None):
         layer = lasagne.layers.InputLayer(shape=self._shape, input_var=input_var)
 
-        # TODO: swap this part out with conv layers
         # ======================================================================================
         size = self.input_size
         while size > self.enc_size * 2:
-            layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify)
-            layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify)
+            for i in xrange(self.module_size):
+                layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify)
             size = size // 2
         # ======================================================================================
 
@@ -84,12 +86,11 @@ class RedactionNetwork(object):
     def _build_decoder(self, input_layer):
         layer = input_layer
 
-        # TODO: swap this part out with deconv layers
         # ======================================================================================
         size = self.enc_size * 2
         while size < self.input_size * 2:
-            layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify)
-            layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify)
+            for i in xrange(self.module_size):
+                layer = lasagne.layers.DenseLayer(layer, num_units=size, nonlinearity=leaky_rectify)
             size *= 2
         # ======================================================================================
 
@@ -101,10 +102,8 @@ class RedactionNetwork(object):
     def _build_discriminator(self, input_layer):
         layer = input_layer
 
-        # TODO: vary the power of the discriminator
         # ======================================================================================
-        k = 2 # some hyperparam
-        for i in xrange(k):
+        for i in xrange(self.num_discr_layers):
             layer = DenseLayer(layer, num_units=self.output_size*2, nonlinearity=leaky_rectify)
         # ======================================================================================
 
@@ -120,6 +119,8 @@ if __name__ == '__main__':
         # hyperparams
         ENCODING_SIZE = int(sys.argv[3])
         RECON_ALPHA = float(sys.argv[4])
+        MODULE_SIZE = int(sys.argv[5])
+        NUM_DISCR_LAYERS = int(sys.argv[6])
 
         # other constants
         NUM_EPOCHS = int(sys.argv[1])
@@ -144,7 +145,8 @@ if __name__ == '__main__':
     inputs = T.matrix('inputs')
     targets = T.matrix('targets')
     r = RedactionNetwork(inputs, targets, shape=(None, X_train.shape[1]), encoding_size=ENCODING_SIZE,
-                         output_size=y_train.shape[1], alpha=RECON_ALPHA)
+                         output_size=y_train.shape[1], alpha=RECON_ALPHA, module_size=MODULE_SIZE,
+                         num_dl=NUM_DISCR_LAYERS)
 
     print("Starting Training ...")
     for epoch in xrange(NUM_EPOCHS):
@@ -154,10 +156,10 @@ if __name__ == '__main__':
 
         t = time.time()
         for batch in iterate_minibatches(X_train, y_train, BATCH_SIZE, shuffle=True):
-            input, target = batch
+            input_, target_ = batch
 
-            train_err += r.joint_train_fn(input, target)
-            adv_acc += r.adv_accuracy_fn(input, target)
+            train_err += r.joint_train_fn(input_, target_)
+            adv_acc += r.adv_accuracy_fn(input_, target_)
             train_batches += 1
         et = time.time()
 
@@ -165,8 +167,17 @@ if __name__ == '__main__':
         print("  training loss: \t{:.6f}".format((train_err)/train_batches))
         print("  prediction accuracy: \t{:.4f}%".format(((adv_acc)/train_batches)*100))
 
+    
+    #adv_acc = r.adv_accuracy_fn(X_test, y_test)
+    #adv_acc = r.adv_accuracy_fn(X_test, y_test)
+    X_calibrated = r.dec_pred_fn(X_test)
+    calibrated_pred_acc = r.adv_accuracy_fn(X_test, y_test)
+    print("Calibrated accuracy: \t{:.3f}".format(calibrated_pred_acc))
+    
     name_str = str(sys.argv[0].split('.')[0]) + '_' + str(ENCODING_SIZE) + '_' + str(RECON_ALPHA)
+    np.savetxt(name_str + '_calibrated.txt', X_calibrated)
     np.savez(name_str + '_params.npz', *r.joint_params)
+
 
     '''
     with np.load('model.npz') as f:

@@ -11,7 +11,8 @@ def load_data(split_size):
 
     :return: y is a dictionary of {confounder_name: [categories, one_hot_representation]}
     """
-    #gene_counts = pd.DataFrame.from_csv('RNASeqQC.all_samples.gene.counts.txt', sep='\t')
+    """
+    gene_counts = pd.DataFrame.from_csv('RNASeqQC.all_samples.gene.counts.txt', sep='\t')
     gene_counts = pd.DataFrame.from_csv('log_transformed_gene_counts.csv', sep=',')
     gene_counts = gene_counts.set_index(gene_counts.iloc[:,0]).iloc[:,1:]
     X = gene_counts.transpose().as_matrix()
@@ -25,8 +26,12 @@ def load_data(split_size):
     for confounder in confounders:
         c_unique, c_idx = np.unique(meta[confounder], return_inverse=True)
         y[confounder] = [c_unique, np.eye(len(c_unique))[c_idx]]
+    """
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y['sample_type'][1], test_size=split_size)
+    y = np.loadtxt('SEQC_ABCD_PCA.csv', delimiter=',')
+    X = np.loadtxt('onehots.csv', delimiter=',')
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=split_size)
     return X_train, y_train, X_test, y_test
 
 if __name__ == '__main__':
