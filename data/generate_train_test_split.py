@@ -28,8 +28,8 @@ def load_data(split_size):
         y[confounder] = [c_unique, np.eye(len(c_unique))[c_idx]]
     """
 
-    y = np.loadtxt('SEQC_ABCD_PCA.csv', delimiter=',')
-    X = np.loadtxt('onehots.csv', delimiter=',')
+    X = np.loadtxt('SEQC_ABCD_PCA.csv', delimiter=',')
+    y = np.loadtxt('onehots.csv', delimiter=',')
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=split_size)
     return X_train, y_train, X_test, y_test
